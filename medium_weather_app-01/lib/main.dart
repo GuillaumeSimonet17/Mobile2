@@ -42,12 +42,21 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
   String _temperature = '';
   String _cityName = '';
   String _country = '';
-  String _wind = '';
+  String _region = '';
+  String _windSpeed = '';
+
+  List<Map<String, String>> suggestions = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this, initialIndex: 0);
+
+    _searchController.addListener(() {
+      if (_searchController.text.isNotEmpty) {
+        getSuggestionCityName(_searchController.text);
+      }
+    });
   }
 
   @override
@@ -59,33 +68,32 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
     super.dispose();
   }
 
-  void _search_exe(value) {
+  void _searchExe(value) async {
+    Map<String, dynamic>? coordinates = await getCoordinates(value);
+    String country = '';
+    String region = '';
+    String search = '';
+    String temperature = '';
+
+    if (coordinates != null && coordinates["country"] != null &&(coordinates['longitude'] ?? 0.0).isFinite) {
+      country = coordinates["country"];
+      region = coordinates["region"];
+      search = coordinates['longitude'].toString() + ' ' +
+          coordinates['latitude'].toString();
+      temperature = await fetchWeather(coordinates['longitude'].toString(), coordinates['latitude'].toString());
+
+    }
+
+
     setState(() {
-      searchText = value;
-      _searchController.clear();
+      _cityName = value;
+        _country = country;
+        _region = region;
+        searchText = search;
+        _temperature = temperature;
+        _searchController.clear();
     });
   }
-
-
-  // Future<void> fetchCoordinates(String cityName) async {
-  //   final url = Uri.parse(
-  //       "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=1&language=fr&format=json");
-  //
-  //   final response = await http.get(url);
-  //
-  //   if (response.statusCode == 200) {
-  //     final data = jsonDecode(response.body);
-  //     if (data["results"] != null) {
-  //       double latitude = data["results"][0]["latitude"];
-  //       double longitude = data["results"][0]["longitude"];
-  //       print("Latitude: $latitude, Longitude: $longitude");
-  //     } else {
-  //       print("Aucune ville trouvée.");
-  //     }
-  //   } else {
-  //     print("Erreur: ${response.statusCode}");
-  //   }
-  // }
 
   Future<String> getCityName(double longitude, double latitude) async {
     print(longitude);
@@ -119,9 +127,68 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
       final data = jsonDecode(response.body);
 
       String temperature = data['current']['temperature_2m'].toString() + data['current_units']['temperature_2m'];
+      print('=============================$temperature');
       return temperature;
     } else {
       return "Erreur: ${response.statusCode}";
+    }
+  }
+
+  Future<void> getSuggestionCityName(String cityName) async {
+    final url = Uri.parse(
+        "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=10&language=fr");
+
+    final response = await http.get(url);
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+
+      if (data['results'] != null) {
+        List<String> cityNames = data['results'].map((city) => city["name"]
+            .toString()).toList().cast<String>();
+        List<String> countryNames = data['results'].map((city) => city["country"]
+            .toString()).toList().cast<String>();
+        List<String> regions = data['results'].map((city) => city["admin1"]
+            .toString()).toList().cast<String>();
+
+        setState(() {
+          suggestions = List.generate(
+            cityNames.length,
+                (index) => {
+              "city": cityNames[index],
+              "country": countryNames[index],
+              "region": regions[index],
+            },
+          );
+        });
+      }
+
+    } else {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getCoordinates(String cityName) async {
+    final url = Uri.parse(
+        "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=1&language=fr");
+
+    final response = await http.get(url);
+    // print('here = $response');
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+
+      if (data['results'] != null && data['results'].isNotEmpty) {
+        double lat = data['results'][0]['latitude'];
+        double lon = data['results'][0]['longitude'];
+        String country = data['results'][0]['country'];
+        String region = data['results'][0]['admin1'];
+
+        return {'latitude': lat, 'longitude': lon, 'country': country, 'region': region};
+      } else {
+        return null;
+      }
+    } else {
+      return null;
     }
   }
 
@@ -152,7 +219,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
       Position position = await _determinePosition();
       String temperature = await fetchWeather(position.longitude, position.latitude);
       String cityName = await getCityName(position.longitude, position.latitude);
-      print(cityName);
+      print(temperature);
       setState(() {
         _temperature = temperature;
         _cityName = cityName;
@@ -208,6 +275,14 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           style: TextStyle(fontSize: 24),
         ),
         Text(
+          _country,
+          style: TextStyle(fontSize: 24),
+        ),
+        Text(
+          _region,
+          style: TextStyle(fontSize: 24),
+        ),
+        Text(
           _temperature,
           style: TextStyle(fontSize: 24),
         ),
@@ -229,11 +304,12 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
                   hintText: 'Rechercher...',
                 ),
                 onSubmitted: (value) {
-                  _search_exe(value);
+                  _searchExe(value);
                 },
                 style: TextStyle(color: Colors.black),
               ),
             ),
+            // Correction ici : Utilisation de Flexible
             IconButton(
               icon: Icon(Icons.location_on),
               onPressed: () {
@@ -244,13 +320,47 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
         ),
       ),
 
-      body: TabBarView(
-        controller: _tabController,
+      body: Stack(
         children: [
-          _buildTabContent('Currently'),
-          _buildTabContent('Today'),
-          _buildTabContent('Weekly'),
-        ],
+          TabBarView(
+            controller: _tabController,
+            children: [
+              _buildTabContent('Currently'),
+              _buildTabContent('Today'),
+              _buildTabContent('Weekly'),
+            ],
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0, // Juste sous l'AppBar
+            child: Visibility(
+              visible: suggestions.isNotEmpty,
+              child: Container(
+                color: Colors.grey[200],
+                constraints: BoxConstraints(maxHeight: 520), // Limite la hauteur
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: suggestions.length,
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      title: Text(suggestions[index]['city'] ?? ''),
+                      subtitle: Text(
+                        '${suggestions[index]['region'] ?? ''}, ${suggestions[index]['country'] ?? ''}',
+                      ),
+                      onTap: () {
+                        _searchExe(suggestions[index]['city']!);
+                        setState(() {
+                          suggestions.clear();
+                        });
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ]
       ),
 
       bottomNavigationBar: BottomAppBar(
