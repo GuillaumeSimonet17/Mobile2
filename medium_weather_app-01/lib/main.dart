@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-
 
 void main() {
   runApp(const WeatherApp());
@@ -32,11 +30,12 @@ class WeatherHomePage extends StatefulWidget {
   _WeatherHomePageState createState() => _WeatherHomePageState();
 }
 
-class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderStateMixin {
+class _WeatherHomePageState extends State<WeatherHomePage>
+    with TickerProviderStateMixin {
   late TabController _tabController;
   TextEditingController _searchController = TextEditingController();
-  bool tabNameActived = true;
 
+  String _position = '';
   String searchText = '';
   String geolocation = '';
   String _temperature = '';
@@ -71,72 +70,87 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
   void _searchExe(value) async {
     Map<String, dynamic>? coordinates = await getCoordinates(value);
     String country = '';
+    String city = '';
     String region = '';
-    String search = '';
-    String temperature = '';
+    String position = '';
+    List<String> weather = [];
 
-    if (coordinates != null && coordinates["country"] != null &&(coordinates['longitude'] ?? 0.0).isFinite) {
+    if (coordinates != null &&
+        coordinates["country"] != null &&
+        (coordinates['longitude'] ?? 0.0).isFinite) {
       country = coordinates["country"];
+      city = coordinates["city"];
       region = coordinates["region"];
-      search = coordinates['longitude'].toString() + ' ' +
+      position =
+          coordinates['longitude'].toString() +
+          ' ' +
           coordinates['latitude'].toString();
-      temperature = await fetchWeather(coordinates['longitude'].toString(), coordinates['latitude'].toString());
-
+      weather = await fetchWeather(
+        coordinates['longitude'].toString(),
+        coordinates['latitude'].toString(),
+      );
     }
 
-
     setState(() {
-      _cityName = value;
-        _country = country;
-        _region = region;
-        searchText = search;
-        _temperature = temperature;
-        _searchController.clear();
+      _cityName = city;
+      _country = country;
+      _region = region;
+      _position = position;
+      _temperature = weather[0];
+      _windSpeed = weather[1];
+      searchText = '';
+      _searchController.clear();
+      suggestions.clear();
     });
   }
 
-  Future<String> getCityName(double longitude, double latitude) async {
-    print(longitude);
-    print(latitude);
+  Future<List<String>> getCityAndState(
+    double longitude,
+    double latitude,
+  ) async {
+    String api = "69194e403214af6ed44902500147d7da";
+
     final url = Uri.parse(
-        "https://api.open-meteo.com/v1/geocoding?latitude=4.835659&longitude=45.764043&language=fr");
+      "http://api.openweathermap.org/geo/1.0/reverse?lat=$latitude&lon=$longitude&limit=1&appid=$api",
+    );
 
     final response = await http.get(url);
-    print(response.statusCode);
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      print(data);
 
-      if (data['results'] != null && data['results'].isNotEmpty) {
-        return data['results'][0]['name']; // Nom de la ville
-      } else {
-        return "Aucune ville trouvée";
-      }
+      return [data[0]['name'], data[0]['state'], data[0]['country']];
     } else {
-      return "Erreur: ${response.statusCode}";
+      return ["Erreur: ${response.statusCode}"];
     }
   }
 
-  Future<String> fetchWeather(longitude, latitude) async {
+  Future<List<String>> fetchWeather(longitude, latitude) async {
     final url = Uri.parse(
-        "https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode&timezone=Europe/Paris");
+      "https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode,windspeed_10m&timezone=Europe/Paris",
+    );
 
     final response = await http.get(url);
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
 
-      String temperature = data['current']['temperature_2m'].toString() + data['current_units']['temperature_2m'];
-      print('=============================$temperature');
-      return temperature;
+      print('eather === $data');
+
+      String temperature =
+          data['current']['temperature_2m'].toString() +
+          data['current_units']['temperature_2m'];
+      String windspeed = data['current']['windspeed_10m'].toString() + ' k/h';
+
+      return [temperature, windspeed];
     } else {
-      return "Erreur: ${response.statusCode}";
+      return ["Erreur: ${response.statusCode}"];
     }
   }
 
   Future<void> getSuggestionCityName(String cityName) async {
     final url = Uri.parse(
-        "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=10&language=fr");
+      "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=10&language=fr",
+    );
 
     final response = await http.get(url);
 
@@ -144,17 +158,26 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
       final data = jsonDecode(response.body);
 
       if (data['results'] != null) {
-        List<String> cityNames = data['results'].map((city) => city["name"]
-            .toString()).toList().cast<String>();
-        List<String> countryNames = data['results'].map((city) => city["country"]
-            .toString()).toList().cast<String>();
-        List<String> regions = data['results'].map((city) => city["admin1"]
-            .toString()).toList().cast<String>();
+        List<String> cityNames =
+            data['results']
+                .map((city) => city["name"].toString())
+                .toList()
+                .cast<String>();
+        List<String> countryNames =
+            data['results']
+                .map((city) => city["country"].toString())
+                .toList()
+                .cast<String>();
+        List<String> regions =
+            data['results']
+                .map((city) => city["admin1"].toString())
+                .toList()
+                .cast<String>();
 
         setState(() {
           suggestions = List.generate(
             cityNames.length,
-                (index) => {
+            (index) => {
               "city": cityNames[index],
               "country": countryNames[index],
               "region": regions[index],
@@ -162,7 +185,6 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           );
         });
       }
-
     } else {
       return null;
     }
@@ -170,10 +192,11 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
 
   Future<Map<String, dynamic>?> getCoordinates(String cityName) async {
     final url = Uri.parse(
-        "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=1&language=fr");
+      "https://geocoding-api.open-meteo.com/v1/search?name=$cityName&count=1&language=fr",
+    );
 
     final response = await http.get(url);
-    // print('here = $response');
+
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
 
@@ -181,9 +204,16 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
         double lat = data['results'][0]['latitude'];
         double lon = data['results'][0]['longitude'];
         String country = data['results'][0]['country'];
+        String city = data['results'][0]['name'];
         String region = data['results'][0]['admin1'];
 
-        return {'latitude': lat, 'longitude': lon, 'country': country, 'region': region};
+        return {
+          'latitude': lat,
+          'longitude': lon,
+          'country': country,
+          'region': region,
+          'city': city,
+        };
       } else {
         return null;
       }
@@ -195,37 +225,53 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
   Future<bool> _requestLocationPermission() async {
     var status = await Permission.location.status;
 
-    if (status.isDenied) {
-      final permissionStatus = await Permission.location.request();
-
-      if (permissionStatus != PermissionStatus.granted) {
-        print('Permissions de localisation refusées');
-        return false;
-      }
+    if (status.isGranted) {
+      return true; // Déjà autorisé
     }
-    return true;
+
+    if (status.isPermanentlyDenied) {
+      print("Permission refusée définitivement. Ouvrir les paramètres.");
+      openAppSettings(); // Ouvre les paramètres de l'application
+      return false;
+    }
+
+    // Demander la permission si elle est "denied"
+    final permissionStatus = await Permission.location.request();
+    if (permissionStatus.isGranted) {
+      return true;
+    }
+
+    print("Permission refusée");
+    return false;
   }
 
   void _locationExe() async {
     if (!await _requestLocationPermission()) {
       setState(() {
-        tabNameActived = false;
-        searchText = 'Geoloation is not available, please enable it in your App settings';
+        searchText =
+            'Geoloation is not available, please enable it in your App settings';
       });
       return;
     }
 
     try {
       Position position = await _determinePosition();
-      String temperature = await fetchWeather(position.longitude, position.latitude);
-      String cityName = await getCityName(position.longitude, position.latitude);
-      print(temperature);
+      List<String> weather = await fetchWeather(
+        position.longitude,
+        position.latitude,
+      );
+      List<String> cityAndState = await getCityAndState(
+        position.longitude,
+        position.latitude,
+      );
       setState(() {
-        _temperature = temperature;
-        _cityName = cityName;
-        searchText = '$position';
+        _temperature = weather[0];
+        _windSpeed = weather[1];
+        _cityName = cityAndState[0];
+        _country = cityAndState[2];
+        _region = cityAndState[1];
+        _position = '$position';
       });
-
     } catch (e) {
       print('Something went wrong');
     }
@@ -250,43 +296,57 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
 
     if (permission == LocationPermission.deniedForever) {
       return Future.error(
-          'Location permissions are permanently denied, we cannot request permissions.');
+        'Location permissions are permanently denied, we cannot request permissions.',
+      );
     }
 
     return await Geolocator.getCurrentPosition();
   }
 
-
-  Widget _buildTabContent(String tabName) {
+  Widget _buildTabToday() {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisAlignment: MainAxisAlignment.start,
       children: [
-        if (tabNameActived)
-            Text(
-            tabName,
-            style: TextStyle(fontSize: 24),
-          ),
-        Text(
-          searchText,
-          style: TextStyle(fontSize: 24),
-        ),
-        Text(
-          _cityName,
-          style: TextStyle(fontSize: 24),
-        ),
-        Text(
-          _country,
-          style: TextStyle(fontSize: 24),
-        ),
-        Text(
-          _region,
-          style: TextStyle(fontSize: 24),
-        ),
-        Text(
-          _temperature,
-          style: TextStyle(fontSize: 24),
-        ),
-      ]
+        if (searchText.isNotEmpty)
+          Text(searchText, style: TextStyle(fontSize: 24, color: Colors.red))
+        else ...[
+          Text(_cityName, style: TextStyle(fontSize: 24)),
+          Text(_region, style: TextStyle(fontSize: 24)),
+          Text(_country, style: TextStyle(fontSize: 24)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTabWeekly() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        if (searchText.isNotEmpty)
+          Text(searchText, style: TextStyle(fontSize: 24, color: Colors.red))
+        else ...[
+          Text(_cityName, style: TextStyle(fontSize: 24)),
+          Text(_region, style: TextStyle(fontSize: 24)),
+          Text(_country, style: TextStyle(fontSize: 24)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTabCurrently() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: [
+        if (searchText.isNotEmpty)
+          Text(searchText, style: TextStyle(fontSize: 24, color: Colors.red))
+        else ...[
+          Text(_cityName, style: TextStyle(fontSize: 24)),
+          Text(_region, style: TextStyle(fontSize: 24)),
+          Text(_country, style: TextStyle(fontSize: 24)),
+          Text(_temperature, style: TextStyle(fontSize: 24)),
+          Text(_windSpeed, style: TextStyle(fontSize: 24)),
+        ],
+      ],
     );
   }
 
@@ -300,16 +360,13 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
             Expanded(
               child: TextField(
                 controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Rechercher...',
-                ),
+                decoration: InputDecoration(hintText: 'Rechercher...'),
                 onSubmitted: (value) {
                   _searchExe(value);
                 },
                 style: TextStyle(color: Colors.black),
               ),
             ),
-            // Correction ici : Utilisation de Flexible
             IconButton(
               icon: Icon(Icons.location_on),
               onPressed: () {
@@ -325,9 +382,9 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           TabBarView(
             controller: _tabController,
             children: [
-              _buildTabContent('Currently'),
-              _buildTabContent('Today'),
-              _buildTabContent('Weekly'),
+              _buildTabCurrently(),
+              _buildTabToday(),
+              _buildTabWeekly(),
             ],
           ),
           Positioned(
@@ -338,7 +395,8 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
               visible: suggestions.isNotEmpty,
               child: Container(
                 color: Colors.grey[200],
-                constraints: BoxConstraints(maxHeight: 520), // Limite la hauteur
+                constraints: BoxConstraints(maxHeight: 520),
+                // Limite la hauteur
                 child: ListView.builder(
                   shrinkWrap: true,
                   itemCount: suggestions.length,
@@ -360,7 +418,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
               ),
             ),
           ),
-        ]
+        ],
       ),
 
       bottomNavigationBar: BottomAppBar(
