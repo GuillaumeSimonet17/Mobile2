@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -26,6 +28,56 @@ class WeatherApp extends StatelessWidget {
   }
 }
 
+class HourlyWeather {
+  late DateTime time;
+  late double temperature;
+  late int weatherCode;
+  late double windSpeed;
+
+  HourlyWeather({
+    required this.time,
+    required this.temperature,
+    required this.weatherCode,
+    required this.windSpeed,
+  });
+
+  String getWeatherDescription() {
+    switch(weatherCode) {
+      case 0: return 'Ciel dégagé';
+      case 1: return 'Partiellement nuageux';
+      case 2: return 'Nuageux';
+      case 3: return 'Très nuageux';
+      case 51: return 'Bruine légère';
+      case 53: return 'Bruine modérée';
+      case 55: return 'Bruine dense';
+      case 61: return 'Pluie légère';
+      case 63: return 'Pluie modérée';
+      case 65: return 'Pluie forte';
+      case 71: return 'Neige légère';
+      case 73: return 'Neige modérée';
+      case 75: return 'Neige forte';
+      case 80: return 'Averses de pluie légères';
+      case 81: return 'Averses de pluie modérées';
+      case 82: return 'Averses de pluie violentes';
+      case 95: return 'Orage';
+      default: return 'Conditions inconnues';
+    }
+  }
+}
+
+class WeeklyWeather {
+  late DateTime time;
+  late double temperatureMax;
+  late double temperatureMin;
+
+  WeeklyWeather({
+    required this.time,
+    required this.temperatureMax,
+    required this.temperatureMin,
+  });
+
+}
+
 class WeatherHomePage extends StatefulWidget {
   @override
   _WeatherHomePageState createState() => _WeatherHomePageState();
@@ -42,6 +94,9 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
   String _country = '';
   String _region = '';
   String _currentWindSpeed = '';
+  List<HourlyWeather> _dailyWeather = [];
+  List<WeeklyWeather> _weeklyWeather = [];
+
 
   List<Map<String, String>> suggestions = [];
 
@@ -292,6 +347,7 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
         "https://api.open-meteo.com/v1/forecast?"
             "latitude=$latitude&longitude=$longitude"
             "&current=temperature_2m,wind_speed_10m"
+            "&hourly=temperature_2m,wind_speed_10m,weather_code"
         );
 
     final response = await http.get(url);
@@ -303,10 +359,59 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           data['current_units']['temperature_2m'];
       String windSpeed = data['current']['wind_speed_10m'].toString() + ' k/h';
 
+      List<DateTime> times = data['hourly']['time'].map<DateTime>((t) => DateTime.parse(t)).toList();
+
+      List<DateTime> uniqueDays = times
+          .map((dateTime) => DateTime(dateTime.year, dateTime.month, dateTime.day))
+          .toSet()
+          .toList();
+
+      List temp = data['hourly']['temperature_2m'];
+
+      List<List> dailyTemperatures = [];
+      for (int i = 0; i < temp.length; i += 24) {
+        dailyTemperatures.add(temp.sublist(i, i + 24));
+      }
+
+      List<double> minTempList = [];
+      List<double> maxTempList = [];
+
+      for (int i = 0; i < dailyTemperatures.length; i++) {
+        List dayTemps = dailyTemperatures[i];
+        double minTemp = dayTemps.reduce((a, b) => a < b ? a : b);
+        minTempList.add(minTemp);
+        double maxTemp = dayTemps.reduce((a, b) => a > b ? a : b);
+        maxTempList.add(maxTemp);
+      }
+
+      List<WeeklyWeather> weeklyWeather = [];
+      for (int i = 0; i < uniqueDays.length; i++) {
+        weeklyWeather.add(WeeklyWeather(
+          time: uniqueDays[i],
+          temperatureMax: maxTempList[i],
+          temperatureMin: minTempList[i],
+        ));
+      }
+
+      List<dynamic> weatherHourlyLast24 = data['hourly']['time'].sublist(0, 24);
+
+      List<HourlyWeather> dailyWeather = (weatherHourlyLast24)
+          .asMap()
+          .entries
+          .map((entry) => HourlyWeather(
+        time: DateTime.parse(entry.value),
+        temperature: data['hourly']['temperature_2m'][entry.key],
+        weatherCode: data['hourly']['weather_code'][entry.key],
+        windSpeed: data['hourly']['wind_speed_10m'][entry.key],
+      )).toList();
+
       setState(() {
         _currentWindSpeed = windSpeed;
         _currentTemperature = temperature;
+        _dailyWeather = dailyWeather;
+        _weeklyWeather = weeklyWeather;
       });
+
       return ;
     } else {
       return ;
@@ -323,6 +428,28 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           Text(_cityName, style: TextStyle(fontSize: 24)),
           Text(_region, style: TextStyle(fontSize: 24)),
           Text(_country, style: TextStyle(fontSize: 24)),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _dailyWeather.length,
+              itemBuilder: (context, index) {
+                final hourData = _dailyWeather[index];
+                return ListTile(
+                  title: Text(
+                    '${hourData.time.hour.toString().padLeft(2, '0')}h',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                  subtitle: Text(
+                    '${hourData.getWeatherDescription()} (${hourData.windSpeed.round()} km/h)',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  trailing: Text(
+                    '${hourData.temperature.round()}°C',
+                    style: TextStyle(fontSize: 16),
+                  ),
+                );
+              },
+            ),
+          )
         ],
       ],
     );
@@ -338,6 +465,31 @@ class _WeatherHomePageState extends State<WeatherHomePage> with TickerProviderSt
           Text(_cityName, style: TextStyle(fontSize: 24)),
           Text(_region, style: TextStyle(fontSize: 24)),
           Text(_country, style: TextStyle(fontSize: 24)),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _weeklyWeather.length,
+              itemBuilder: (context, index) {
+                final hourData = _weeklyWeather[index];
+                return ListTile(
+                  title: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${hourData.time.year.toString().padLeft(2, '0')}-' +
+                            '${hourData.time.month.toString().padLeft(2, '0')}-'
+                            + '${hourData.time.day.toString().padLeft(2, '0')}',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                      Text(
+                        '${hourData.temperatureMin.round()}°C - ${hourData.temperatureMax.round()}°C',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          )
         ],
       ],
     );
